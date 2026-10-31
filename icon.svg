@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#007AFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0056CC;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="iconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E8F0FE;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="url(#bgGrad)"/>
+
+  <!-- Circular certificate/badge shape -->
+  <circle cx="256" cy="256" r="180" fill="url(#iconGrad)" stroke="#007AFF" stroke-width="8"/>
+
+  <!-- Refresh arrow -->
+  <g transform="translate(256, 256)">
+    <path d="M0 -80 L-15 -55 M0 -80 L15 -55 M0 -80 L0 80"
+          stroke="#007AFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M0 80 L-15 55 M0 80 L15 55"
+          stroke="#007AFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- Circular motion arrows -->
+    <path d="M-70 -70 A100 100 0 0 1 70 -70"
+          stroke="#007AFF" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.6"/>
+    <path d="M70 70 A100 100 0 0 1 -70 70"
+          stroke="#007AFF" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.6"/>
+    <!-- Arrow heads on circular paths -->
+    <polygon points="70,-70  55,-85  55,-55" fill="#007AFF" opacity="0.6"/>
+    <polygon points="-70,70  -55,85  -55,55" fill="#007AFF" opacity="0.6"/>
+  </g>
+
+  <!-- Small checkmark in corner -->
+  <g transform="translate(340, 170)">
+    <circle cx="0" cy="0" r="30" fill="#34C759"/>
+    <path d="M-12 0 L-4 8 L16 -12" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

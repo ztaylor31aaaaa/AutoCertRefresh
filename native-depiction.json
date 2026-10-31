@@ -1,0 +1,57 @@
+{
+  "class": "Depiction",
+  "headerImage": "https://yourrepo.com/depictions/autocertrefresh/header.png",
+  "tintColor": "#007AFF",
+  "tabs": [
+    {
+      "tabname": "Details",
+      "class": "DepictionTableView",
+      "items": [
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "## AutoCertRefresh\n\nAutomatically refreshes apps installed from your developer/enterprise certificate. Detects the Apple ID used by Dopamine/host jailbreak, stores a verification token in Keychain, and schedules background refreshes via BGTaskScheduler with launchd fallback.\n\n### Features\n- **Auto-detects** your Dopamine/host jailbreak Apple ID\n- **Keychain-secured** verification token\n- **Background refresh** every 1-24 hours (configurable)\n- **Certificate-aware** — only refreshes apps matching your cert\n- **Test button** in Settings for manual refresh\n- **Rootless compatible** — works with Dopamine, palera1n, roothide\n\n### Requirements\n- iOS 14.0+\n- Jailbroken (Dopamine, palera1n, roothide, etc.)\n- Sileo 2.0+\n- PreferenceLoader\n- Developer/Enterprise certificate installed"
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "View on GitHub",
+          "action": "https://github.com/yourusername/AutoCertRefresh"
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "Report Issue",
+          "action": "https://github.com/yourusername/AutoCertRefresh/issues"
+        }
+      ]
+    },
+    {
+      "tabname": "Changelog",
+      "class": "DepictionTableView",
+      "items": [
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "### 1.0.0 (Initial Release)\n- Initial release\n- Auto-detect Dopamine account\n- Keychain token storage\n- Background refresh scheduling\n- Certificate-based app detection\n- Preference bundle with test controls\n- Rootless jailbreak compatibility"
+        }
+      ]
+    },
+    {
+      "tabname": "Settings",
+      "class": "DepictionTableView",
+      "items": [
+        {
+          "class": "DepictionMarkdownView",
+          "markdown": "Configure AutoCertRefresh from **Settings → AutoCertRefresh**:\n\n- **Enable Auto Refresh** — Master toggle\n- **Refresh Interval** — 1 to 24 hours\n- **Account Override** — Manually specify Apple ID (optional)\n- **Use Keychain Token** — Enable secure token verification\n- **Setup Verification Token** — Create/verify your token\n- **Test Refresh Now** — Manual trigger\n- **Clear Stored Token** — Remove token from Keychain\n\nDetected account info displays automatically at the bottom."
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "url": "https://yourrepo.com/depictions/autocertrefresh/settings.png",
+      "description": "Settings panel"
+    },
+    {
+      "url": "https://yourrepo.com/depictions/autocertrefresh/token.png",
+      "description": "Token setup"
+    }
+  ]
+}

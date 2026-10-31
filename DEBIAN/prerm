@@ -1,0 +1,24 @@
+#!/bin/bash
+# prerm script for AutoCertRefresh
+
+set -e
+
+DAEMON_PLIST="/Library/LaunchDaemons/com.autocertrefresh.daemon.plist"
+
+echo "Removing AutoCertRefresh..."
+
+# Unload launchd daemon
+if [ -f "$DAEMON_PLIST" ]; then
+    if command -v launchctl >/dev/null 2>&1; then
+        launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || true
+        launchctl disable system/com.autocertrefresh.daemon 2>/dev/null || true
+    fi
+    rm -f "$DAEMON_PLIST"
+fi
+
+# Clean up log files (optional - comment out to preserve logs)
+# rm -f /var/mobile/Library/Logs/AutoCertRefresh.log
+# rm -f /var/mobile/Library/Logs/AutoCertRefresh.error.log
+
+echo "AutoCertRefresh removed."
+exit 0

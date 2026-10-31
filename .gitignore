@@ -1,0 +1,29 @@
+# Theos build artifacts
+.theos/
+*.deb
+*.dylib
+*.so
+*.framework
+
+# Object files
+*.o
+*.obj
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/var/mobile/Library/Logs/AutoCertRefresh*.log
+
+# Package staging
+.debbuilder/
+packages/

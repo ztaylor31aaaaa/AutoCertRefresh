@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>cell</key>
+        <string>PSGroupCell</string>
+        <key>label</key>
+        <string>AutoCertRefresh</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSSwitchCell</string>
+        <key>default</key>
+        <true/>
+        <key>key</key>
+        <string>enabled</string>
+        <key>label</key>
+        <string>Enable Auto Refresh</string>
+        <key>PostNotification</key>
+        <string>com.autocertrefresh.settingschanged</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSSliderCell</string>
+        <key>default</key>
+        <integer>6</string>
+        <key>key</key>
+        <string>refreshIntervalHours</string>
+        <key>label</key>
+        <string>Refresh Interval (hours)</string>
+        <key>max</key>
+        <integer>24</string>
+        <key>min</key>
+        <integer>1</string>
+        <key>PostNotification</key>
+        <string>com.autocertrefresh.settingschanged</string>
+        <key>showValue</key>
+        <true/>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSTextFieldCell</string>
+        <key>key</key>
+        <string>accountOverride</string>
+        <key>label</key>
+        <string>Account Override (Apple ID)</string>
+        <key>placeholder</key>
+        <string>Auto-detect from Dopamine</string>
+        <key>PostNotification</key>
+        <string>com.autocertrefresh.settingschanged</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSSwitchCell</string>
+        <key>default</key>
+        <true/>
+        <key>key</key>
+        <string>useKeychainToken</string>
+        <key>label</key>
+        <string>Use Keychain Token</string>
+        <key>PostNotification</key>
+        <string>com.autocertrefresh.settingschanged</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSButtonCell</string>
+        <key>key</key>
+        <string>setupToken</string>
+        <key>label</key>
+        <string>Setup Verification Token</string>
+        <key>action</key>
+        <string>setupTokenAction:</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSButtonCell</string>
+        <key>key</key>
+        <string>testRefresh</string>
+        <key>label</key>
+        <string>Test Refresh Now</string>
+        <key>action</key>
+        <string>testRefreshAction:</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSButtonCell</string>
+        <key>key</key>
+        <string>clearToken</string>
+        <key>label</key>
+        <string>Clear Stored Token</string>
+        <key>action</key>
+        <string>clearTokenAction:</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSGroupCell</string>
+        <key>label</key>
+        <string>Detected Account</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSStaticTextCell</string>
+        <key>key</key>
+        <string>detectedAccount</string>
+        <key>label</key>
+        <string>Apple ID</string>
+        <key>default</key>
+        <string>Detecting...</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSStaticTextCell</string>
+        <key>key</key>
+        <string>detectedTeamId</string>
+        <key>label</key>
+        <string>Team ID</string>
+        <key>default</key>
+        <string>Detecting...</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSStaticTextCell</string>
+        <key>key</key>
+        <string>detectedCertCount</string>
+        <key>label</key>
+        <string>Certificates Found</string>
+        <key>default</key>
+        <string>Detecting...</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSGroupCell</string>
+        <key>label</key>
+        <string>About</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSStaticTextCell</string>
+        <key>label</key>
+        <string>AutoCertRefresh v1.0.0</string>
+    </dict>
+    <dict>
+        <key>cell</key>
+        <string>PSStaticTextCell</string>
+        <key>label</key>
+        <string>Automatically refreshes apps signed with your certificate</string>
+    </dict>
+</array>
+</plist>

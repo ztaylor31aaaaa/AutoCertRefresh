@@ -1,0 +1,17 @@
+Package: com.autocertrefresh
+Name: AutoCertRefresh
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Automatically refreshes apps installed from your developer/enterprise certificate. Detects the Apple ID used by Dopamine/host jailbreak, stores a verification token in Keychain, and schedules background refreshes via BGTaskScheduler + launchd fallback.
+Maintainer: Your Name <your@email.com>
+Author: Your Name
+Section: Tweaks
+Depends: firmware (>= 14.0), preferenceloader, libswift5.5, mobilesubstrate (>= 0.9.7000), org.coolstar.sileo (>= 2.0)
+Conflicts:
+Provides:
+Replaces:
+Priority: optional
+Homepage: https://github.com/yourusername/AutoCertRefresh
+Icon: icon.png
+SileoDepiction: https://yourrepo.com/depiction/com.autocertrefresh.json
+Tag: Auto-refresh, Certificate, Enterprise, Developer, Dopamine, Sileo

@@ -1,0 +1,43 @@
+#!/bin/bash
+# postinst script for AutoCertRefresh
+
+set -e
+
+PACKAGE="com.autocertrefresh"
+DAEMON_PLIST="/Library/LaunchDaemons/com.autocertrefresh.daemon.plist"
+DAEMON_SOURCE="/Library/Application Support/AutoCertRefresh/com.autocertrefresh.daemon.plist"
+LOG_DIR="/var/mobile/Library/Logs"
+
+echo "Configuring AutoCertRefresh..."
+
+# Create log directory
+mkdir -p "$LOG_DIR"
+chown mobile:mobile "$LOG_DIR"
+chmod 755 "$LOG_DIR"
+
+# Install launchd plist if it exists
+if [ -f "$DAEMON_SOURCE" ]; then
+    cp "$DAEMON_SOURCE" "$DAEMON_PLIST"
+    chown root:wheel "$DAEMON_PLIST"
+    chmod 644 "$DAEMON_PLIST"
+
+    # Load the daemon (only if not in a container/chroot)
+    if [ -d "/bootstrap" ] && command -v launchctl >/dev/null 2>&1; then
+        launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null || true
+        launchctl enable system/com.autocertrefresh.daemon 2>/dev/null || true
+        launchctl kickstart -k system/com.autocertrefresh.daemon 2>/dev/null || true
+    fi
+fi
+
+# Update PreferenceLoader cache
+if command -v preferenceloader >/dev/null 2>&1; then
+    preferenceloader 2>/dev/null || true
+fi
+
+# Run uicache
+if command -v uicache >/dev/null 2>&1; then
+    uicache -p /Applications 2>/dev/null || true
+fi
+
+echo "AutoCertRefresh configured successfully!"
+exit 0

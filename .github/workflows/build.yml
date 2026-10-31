@@ -1,0 +1,200 @@
+name: Build AutoCertRefresh
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:  # Manual trigger
+
+permissions:
+  contents: read
+  packages: write  # For ghcr.io if needed
+
+env:
+  THEOS_DIR: /opt/theos
+  IOS_SDK_VERSION: 16.5
+  TARGET_IOS: 14.0
+
+jobs:
+  build:
+    name: Build .deb (${{ matrix.arch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, arm64e]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need tags for version
+
+      - name: Set version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            # Dev build: commit count + short hash
+            COUNT=$(git rev-list --count HEAD)
+            HASH=$(git rev-parse --short HEAD)
+            echo "VERSION=0.0.0-dev.${COUNT}.${HASH}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cache Theos & SDK
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/theos
+            ~/.theos-cache
+          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-
+
+      - name: Install Theos & SDK (if not cached)
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          # Install Theos
+          git clone --depth 1 https://github.com/theos/theos.git /opt/theos
+          export THEOS=/opt/theos
+          export PATH=$THEOS/bin:$PATH
+
+          # Install iOS SDK
+          SDK_URL="https://github.com/theos/sdks/releases/download/iphoneos${{ env.IOS_SDK_VERSION }}/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz"
+          echo "Downloading iOS ${{ env.IOS_SDK_VERSION }} SDK..."
+          curl -L -o /tmp/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz "$SDK_URL"
+          mkdir -p /opt/theos/sdks
+          tar -xf /tmp/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz -C /opt/theos/sdks
+          ln -sf /opt/theos/sdks/iphoneos${{ env.IOS_SDK_VERSION }}.sdk /opt/theos/sdks/iphoneos.sdk
+
+          # Install ldid (for signing)
+          brew install ldid
+
+          # Cache the installed tools
+          cp -r /opt/theos ~/.theos-cache/theos
+          cp -r /opt/theos/sdks ~/.theos-cache/sdks
+
+      - name: Restore Theos from cache
+        if: steps.cache-theos.outputs.cache-hit == 'true'
+        run: |
+          cp -r ~/.theos-cache/theos /opt/theos
+          cp -r ~/.theos-cache/sdks /opt/theos/sdks
+          export THEOS=/opt/theos
+          export PATH=$THEOS/bin:$PATH
+
+      - name: Verify toolchain
+        run: |
+          export THEOS=/opt/theos
+          export PATH=$THEOS/bin:$PATH
+          echo "=== Toolchain ==="
+          which make
+          which clang
+          which ldid
+          which dpkg-deb
+          $THEOS/bin/bootstrap.sh --version || true
+          ls -la $THEOS/sdks/
+
+      - name: Build package
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          FINALPACKAGE: 1
+          FOR_RELEASE: 1
+        run: |
+          export THEOS=/opt/theos
+          export PATH=$THEOS/bin:$PATH
+
+          # Ensure ARCH is passed to make
+          make package ARCH=${ARCH} VERSION=${VERSION}
+
+          # Find the built deb
+          DEB_FILE=$(find .theos/_/debs -name "*.deb" | head -1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "::error::No .deb found!"
+            ls -la .theos/_/debs/ 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+          echo "DEB_NAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
+
+      - name: Verify .deb contents
+        run: |
+          dpkg-deb -c "${DEB_FILE}"
+          dpkg-deb -I "${DEB_FILE}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoCertRefresh-${{ matrix.arch }}-${{ steps.version.outputs.VERSION }}
+          path: ${{ env.DEB_FILE }}
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: AutoCertRefresh-*
+          merge-multiple: false
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.deb" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "## AutoCertRefresh v${TAG}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> $GITHUB_OUTPUT || echo "- Initial release" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: AutoCertRefresh v${{ steps.version.outputs.VERSION }}
+          body: ${{ steps.changelog.outputs.CHANGELOG }}
+          files: release/*.deb
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional: Build and test install on simulator (requires extra setup)
+  # test:
+  #   name: Test on Simulator
+  #   needs: build
+  #   runs-on: macos-latest
+  #   if: false  # Enable when needed
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: AutoCertRefresh-arm64-${{ needs.build.outputs.version }}
+  #         path: deb
+  #     - name: Install on simulator
+  #       run: |
+  #         # Requires ios-sim or xcrun simctl
+  #         echo "Simulator test placeholder"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
