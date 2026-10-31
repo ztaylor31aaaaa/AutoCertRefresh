@@ -61,8 +61,8 @@ jobs:
             exit 1
           fi
 
-          # Install ldid
-          brew install ldid >/dev/null 2>&1 || true
+          # Install ldid + dpkg (for .deb packaging)
+          brew install ldid dpkg >/dev/null 2>&1 || true
 
       - name: Build package
         env:
