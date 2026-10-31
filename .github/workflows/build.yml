@@ -45,8 +45,14 @@ jobs:
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
 
-          # Install Theos (includes vendor/dpkg/dm.pl for .deb packaging)
+          # Install Theos
           sudo git clone --depth 1 https://github.com/theos/theos.git /opt/theos
+
+          # Download dm.pl directly from Theos repo (vendor is a submodule not cloned with --depth 1)
+          sudo mkdir -p /opt/theos/bin
+          curl -fsSL "https://raw.githubusercontent.com/theos/theos/master/vendor/dpkg/dm.pl" -o /opt/theos/bin/dm.pl
+          sudo chmod +x /opt/theos/bin/dm.pl
+          echo "Downloaded dm.pl from Theos repo"
 
           # Use Xcode's built-in iOS SDK (no download needed)
           # macOS runners have Xcode with iPhoneOS.sdk
@@ -61,20 +67,8 @@ jobs:
             exit 1
           fi
 
-          # Install ldid (dpkg tools come from Theos vendor)
+          # Install ldid
           brew install ldid >/dev/null 2>&1 || true
-
-          # Link Theos's built-in dm.pl to where Theos expects it
-          if [ -f /opt/theos/vendor/dpkg/dm.pl ]; then
-            sudo mkdir -p /opt/theos/bin
-            sudo ln -sf /opt/theos/vendor/dpkg/dm.pl /opt/theos/bin/dm.pl
-            echo "Linked Theos vendor dm.pl to /opt/theos/bin/dm.pl"
-          else
-            echo "::error::Theos vendor dm.pl not found at /opt/theos/vendor/dpkg/dm.pl"
-            ls -la /opt/theos/vendor/ 2>/dev/null || true
-            ls -la /opt/theos/vendor/dpkg/ 2>/dev/null || true
-            exit 1
-          fi
 
       - name: Build package
         env:
