@@ -13,11 +13,9 @@ permissions:
   packages: write
 
 env:
-  THEOS_DIR: /opt/theos
-  # Use iOS 16.4 SDK - more reliably available than 16.5
+  THEOS_DIR: ${{ runner.temp }}/theos
   IOS_SDK_VERSION: 16.4
   TARGET_IOS: 14.0
-  # Disable Swift stdlib linking - SDK may not have it, tweak uses ObjC++ only
   LINK_SWIFT: 0
 
 jobs:
@@ -52,30 +50,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /opt/theos
-            ~/.theos-cache
-          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v3-${{ hashFiles('**/Makefile') }}
+            ${{ runner.temp }}/theos
+            ${{ runner.temp }}/theos-cache
+          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v4-${{ hashFiles('**/Makefile') }}
           restore-keys: |
-            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v3-
+            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v4-
 
       - name: Install Theos & SDK (if not cached)
         if: steps.cache-theos.outputs.cache-hit != 'true'
         env:
           IOS_SDK_VERSION: ${{ env.IOS_SDK_VERSION }}
+          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
           set -euo pipefail
 
-          # Install Theos
-          git clone --depth 1 https://github.com/theos/theos.git /opt/theos
-          export THEOS=/opt/theos
+          export THEOS=$THEOS_PATH
           export PATH=$THEOS/bin:$PATH
 
-          # Install iOS SDK from a reliable mirror
-          # Try primary, then fallback
+          # Install Theos to writable location
+          git clone --depth 1 https://github.com/theos/theos.git $THEOS_PATH
+
+          # Install iOS SDK from reliable mirrors
           SDK_URLS=(
             "https://github.com/theos/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
             "https://github.com/phoenixdev-org/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
-            "https://cdn.discordapp.com/attachments/123456789/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
           )
 
           SDK_DOWNLOADED=0
@@ -92,21 +90,21 @@ jobs:
             exit 1
           fi
 
-          mkdir -p /opt/theos/sdks
-          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C /opt/theos/sdks
+          mkdir -p $THEOS_PATH/sdks
+          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C $THEOS_PATH/sdks
 
           # Find the actual SDK directory name (varies by archive)
-          SDK_DIR=$(find /opt/theos/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
+          SDK_DIR=$(find $THEOS_PATH/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
           if [ -z "$SDK_DIR" ]; then
-            SDK_DIR=$(find /opt/theos/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
+            SDK_DIR=$(find $THEOS_PATH/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
           fi
 
           if [ -n "$SDK_DIR" ]; then
-            ln -sf "$SDK_DIR" /opt/theos/sdks/iphoneos.sdk
-            echo "SDK linked: $SDK_DIR -> /opt/theos/sdks/iphoneos.sdk"
+            ln -sf "$SDK_DIR" $THEOS_PATH/sdks/iphoneos.sdk
+            echo "SDK linked: $SDK_DIR -> $THEOS_PATH/sdks/iphoneos.sdk"
           else
             echo "::error::SDK directory not found after extraction"
-            ls -la /opt/theos/sdks/
+            ls -la $THEOS_PATH/sdks/
             exit 1
           fi
 
@@ -114,20 +112,24 @@ jobs:
           brew install ldid >/dev/null 2>&1 || true
 
           # Cache
-          cp -r /opt/theos ~/.theos-cache/theos
-          cp -r /opt/theos/sdks ~/.theos-cache/sdks
+          cp -r $THEOS_PATH ${{ runner.temp }}/theos-cache/theos
+          cp -r $THEOS_PATH/sdks ${{ runner.temp }}/theos-cache/sdks
 
       - name: Restore Theos from cache
         if: steps.cache-theos.outputs.cache-hit == 'true'
+        env:
+          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          cp -r ~/.theos-cache/theos /opt/theos
-          cp -r ~/.theos-cache/sdks /opt/theos/sdks
-          export THEOS=/opt/theos
+          export THEOS=$THEOS_PATH
           export PATH=$THEOS/bin:$PATH
+          cp -r ${{ runner.temp }}/theos-cache/theos $THEOS_PATH
+          cp -r ${{ runner.temp }}/theos-cache/sdks $THEOS_PATH/sdks
 
       - name: Verify toolchain
+        env:
+          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          export THEOS=/opt/theos
+          export THEOS=$THEOS_PATH
           export PATH=$THEOS/bin:$PATH
           echo "=== Toolchain ==="
           which make
@@ -147,21 +149,20 @@ jobs:
           FINALPACKAGE: 1
           FOR_RELEASE: 1
           LINK_SWIFT: ${{ env.LINK_SWIFT }}
+          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          export THEOS=/opt/theos
+          export THEOS=$THEOS_PATH
           export PATH=$THEOS/bin:$PATH
 
           echo "Building for ARCH=$ARCH VERSION=$VERSION"
 
-          # Build with verbose output on failure
           if make package ARCH=${ARCH} VERSION=${VERSION} 2>&1; then
             echo "Build succeeded"
           else
-            echo "::error::Build failed, showing last 100 lines of make output"
+            echo "::error::Build failed"
             exit 1
           fi
 
-          # Find the built deb
           DEB_FILE=$(find .theos/_/debs -name "*.deb" 2>/dev/null | head -1)
           if [ -z "$DEB_FILE" ]; then
             echo "::error::No .deb found!"
