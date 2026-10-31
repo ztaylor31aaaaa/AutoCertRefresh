@@ -95,7 +95,41 @@ jobs:
           FOR_RELEASE: 1
         run: |
           export THEOS=/opt/theos
-          export PATH=$THEOS/bin:$PATH
+          export PATH=$THEOS/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH
+
+          # Debug: check if dm.pl exists
+          echo "=== Checking for dm.pl ==="
+          ls -la /opt/theos/bin/dm.pl 2>/dev/null || echo "dm.pl not in /opt/theos/bin"
+          find /opt/homebrew -name "dm.pl" 2>/dev/null | head -5
+          find /usr/local -name "dm.pl" 2>/dev/null | head -5
+
+          # Ensure dm.pl is linked
+          if [ ! -f /opt/theos/bin/dm.pl ]; then
+            DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
+            if [ -z "$DMPL_PATH" ]; then
+              DMPL_PATH=$(find /usr/local -name "dm.pl" 2>/dev/null | head -1)
+            fi
+            if [ -n "$DMPL_PATH" ]; then
+              sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
+              echo "Linked dm.pl from $DMPL_PATH"
+            else
+              echo "::error::dm.pl not found anywhere!"
+              # Try installing dpkg-dev
+              brew install dpkg-dev >/dev/null 2>&1 || true
+              DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
+              if [ -n "$DMPL_PATH" ]; then
+                sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
+                echo "Linked dm.pl from $DMPL_PATH after dpkg-dev install"
+              else
+                exit 1
+              fi
+            fi
+          fi
+
+          # Verify dm.pl is executable
+          ls -la /opt/theos/bin/dm.pl
+          /opt/theos/bin/dm.pl --version 2>&1 || true
+
           make package ARCH=${ARCH} VERSION=${VERSION}
 
       - name: Find .deb
