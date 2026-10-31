@@ -13,7 +13,6 @@ permissions:
   packages: write
 
 env:
-  THEOS_DIR: ${{ runner.temp }}/theos
   IOS_SDK_VERSION: 16.4
   TARGET_IOS: 14.0
   LINK_SWIFT: 0
@@ -50,25 +49,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ runner.temp }}/theos
-            ${{ runner.temp }}/theos-cache
-          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v4-${{ hashFiles('**/Makefile') }}
+            ~/theos
+            ~/theos-cache
+          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v5-${{ hashFiles('**/Makefile') }}
           restore-keys: |
-            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v4-
+            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v5-
 
       - name: Install Theos & SDK (if not cached)
         if: steps.cache-theos.outputs.cache-hit != 'true'
         env:
           IOS_SDK_VERSION: ${{ env.IOS_SDK_VERSION }}
-          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
           set -euo pipefail
 
-          export THEOS=$THEOS_PATH
+          export THEOS=~/theos
           export PATH=$THEOS/bin:$PATH
 
           # Install Theos to writable location
-          git clone --depth 1 https://github.com/theos/theos.git $THEOS_PATH
+          git clone --depth 1 https://github.com/theos/theos.git $THEOS
 
           # Install iOS SDK from reliable mirrors
           SDK_URLS=(
@@ -90,21 +88,21 @@ jobs:
             exit 1
           fi
 
-          mkdir -p $THEOS_PATH/sdks
-          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C $THEOS_PATH/sdks
+          mkdir -p $THEOS/sdks
+          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C $THEOS/sdks
 
           # Find the actual SDK directory name (varies by archive)
-          SDK_DIR=$(find $THEOS_PATH/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
+          SDK_DIR=$(find $THEOS/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
           if [ -z "$SDK_DIR" ]; then
-            SDK_DIR=$(find $THEOS_PATH/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
+            SDK_DIR=$(find $THEOS/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
           fi
 
           if [ -n "$SDK_DIR" ]; then
-            ln -sf "$SDK_DIR" $THEOS_PATH/sdks/iphoneos.sdk
-            echo "SDK linked: $SDK_DIR -> $THEOS_PATH/sdks/iphoneos.sdk"
+            ln -sf "$SDK_DIR" $THEOS/sdks/iphoneos.sdk
+            echo "SDK linked: $SDK_DIR -> $THEOS/sdks/iphoneos.sdk"
           else
             echo "::error::SDK directory not found after extraction"
-            ls -la $THEOS_PATH/sdks/
+            ls -la $THEOS/sdks/
             exit 1
           fi
 
@@ -112,24 +110,20 @@ jobs:
           brew install ldid >/dev/null 2>&1 || true
 
           # Cache
-          cp -r $THEOS_PATH ${{ runner.temp }}/theos-cache/theos
-          cp -r $THEOS_PATH/sdks ${{ runner.temp }}/theos-cache/sdks
+          cp -r $THEOS ~/theos-cache/theos
+          cp -r $THEOS/sdks ~/theos-cache/sdks
 
       - name: Restore Theos from cache
         if: steps.cache-theos.outputs.cache-hit == 'true'
-        env:
-          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          export THEOS=$THEOS_PATH
+          export THEOS=~/theos
           export PATH=$THEOS/bin:$PATH
-          cp -r ${{ runner.temp }}/theos-cache/theos $THEOS_PATH
-          cp -r ${{ runner.temp }}/theos-cache/sdks $THEOS_PATH/sdks
+          cp -r ~/theos-cache/theos $THEOS
+          cp -r ~/theos-cache/sdks $THEOS/sdks
 
       - name: Verify toolchain
-        env:
-          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          export THEOS=$THEOS_PATH
+          export THEOS=~/theos
           export PATH=$THEOS/bin:$PATH
           echo "=== Toolchain ==="
           which make
@@ -149,9 +143,8 @@ jobs:
           FINALPACKAGE: 1
           FOR_RELEASE: 1
           LINK_SWIFT: ${{ env.LINK_SWIFT }}
-          THEOS_PATH: ${{ runner.temp }}/theos
         run: |
-          export THEOS=$THEOS_PATH
+          export THEOS=~/theos
           export PATH=$THEOS/bin:$PATH
 
           echo "Building for ARCH=$ARCH VERSION=$VERSION"
