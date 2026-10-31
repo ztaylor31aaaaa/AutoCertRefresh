@@ -3,7 +3,7 @@
 # CI sets VERSION via env; locally falls back to git tag or dev version
 
 export ARCHS = arm64 arm64e
-export TARGET = iphone:clang:16.5:14.0
+export TARGET = iphone:clang:16.4:14.0
 export DEBUG = 0
 export FINALPACKAGE = 1
 export FOR_RELEASE = 1
@@ -31,7 +31,8 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = AutoCertRefresh
 AutoCertRefresh_FILES = Tweak.xm
 AutoCertRefresh_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable
-AutoCertRefresh_LDFLAGS = -lswiftCore -lswiftFoundation -lswiftSecurity -lswiftDispatch
+# Remove Swift libs - SDK may not have them; tweak is ObjC++ only
+AutoCertRefresh_LDFLAGS =
 AutoCertRefresh_FRAMEWORKS = Foundation Security BackgroundTasks
 AutoCertRefresh_PRIVATE_FRAMEWORKS = Preferences
 AutoCertRefresh_LIBRARIES = substrate

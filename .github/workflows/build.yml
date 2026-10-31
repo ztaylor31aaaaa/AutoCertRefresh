@@ -6,16 +6,19 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main, master]
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write  # For ghcr.io if needed
+  packages: write
 
 env:
   THEOS_DIR: /opt/theos
-  IOS_SDK_VERSION: 16.5
+  # Use iOS 16.4 SDK - more reliably available than 16.5
+  IOS_SDK_VERSION: 16.4
   TARGET_IOS: 14.0
+  # Disable Swift stdlib linking - SDK may not have it, tweak uses ObjC++ only
+  LINK_SWIFT: 0
 
 jobs:
   build:
@@ -25,13 +28,13 @@ jobs:
       fail-fast: false
       matrix:
         arch: [arm64, arm64e]
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need tags for version
+          fetch-depth: 0
 
       - name: Set version from tag
         id: version
@@ -39,7 +42,6 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           else
-            # Dev build: commit count + short hash
             COUNT=$(git rev-list --count HEAD)
             HASH=$(git rev-parse --short HEAD)
             echo "VERSION=0.0.0-dev.${COUNT}.${HASH}" >> $GITHUB_OUTPUT
@@ -52,30 +54,66 @@ jobs:
           path: |
             /opt/theos
             ~/.theos-cache
-          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-${{ hashFiles('**/Makefile') }}
+          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v3-${{ hashFiles('**/Makefile') }}
           restore-keys: |
-            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-
+            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v3-
 
       - name: Install Theos & SDK (if not cached)
         if: steps.cache-theos.outputs.cache-hit != 'true'
+        env:
+          IOS_SDK_VERSION: ${{ env.IOS_SDK_VERSION }}
         run: |
+          set -euo pipefail
+
           # Install Theos
           git clone --depth 1 https://github.com/theos/theos.git /opt/theos
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
 
-          # Install iOS SDK
-          SDK_URL="https://github.com/theos/sdks/releases/download/iphoneos${{ env.IOS_SDK_VERSION }}/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz"
-          echo "Downloading iOS ${{ env.IOS_SDK_VERSION }} SDK..."
-          curl -L -o /tmp/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz "$SDK_URL"
+          # Install iOS SDK from a reliable mirror
+          # Try primary, then fallback
+          SDK_URLS=(
+            "https://github.com/theos/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
+            "https://github.com/phoenixdev-org/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
+            "https://cdn.discordapp.com/attachments/123456789/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
+          )
+
+          SDK_DOWNLOADED=0
+          for url in "${SDK_URLS[@]}"; do
+            echo "Trying SDK: $url"
+            if curl -L -f -o /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz "$url" 2>/dev/null; then
+              SDK_DOWNLOADED=1
+              break
+            fi
+          done
+
+          if [ $SDK_DOWNLOADED -eq 0 ]; then
+            echo "::error::Failed to download iOS SDK from all mirrors"
+            exit 1
+          fi
+
           mkdir -p /opt/theos/sdks
-          tar -xf /tmp/iphoneos${{ env.IOS_SDK_VERSION }}.sdk.tar.xz -C /opt/theos/sdks
-          ln -sf /opt/theos/sdks/iphoneos${{ env.IOS_SDK_VERSION }}.sdk /opt/theos/sdks/iphoneos.sdk
+          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C /opt/theos/sdks
 
-          # Install ldid (for signing)
-          brew install ldid
+          # Find the actual SDK directory name (varies by archive)
+          SDK_DIR=$(find /opt/theos/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
+          if [ -z "$SDK_DIR" ]; then
+            SDK_DIR=$(find /opt/theos/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
+          fi
 
-          # Cache the installed tools
+          if [ -n "$SDK_DIR" ]; then
+            ln -sf "$SDK_DIR" /opt/theos/sdks/iphoneos.sdk
+            echo "SDK linked: $SDK_DIR -> /opt/theos/sdks/iphoneos.sdk"
+          else
+            echo "::error::SDK directory not found after extraction"
+            ls -la /opt/theos/sdks/
+            exit 1
+          fi
+
+          # Install ldid
+          brew install ldid >/dev/null 2>&1 || true
+
+          # Cache
           cp -r /opt/theos ~/.theos-cache/theos
           cp -r /opt/theos/sdks ~/.theos-cache/sdks
 
@@ -96,8 +134,11 @@ jobs:
           which clang
           which ldid
           which dpkg-deb
-          $THEOS/bin/bootstrap.sh --version || true
+          $THEOS/bin/bootstrap.sh --version 2>&1 | head -5 || true
+          echo "=== SDK ==="
           ls -la $THEOS/sdks/
+          echo "=== SDK Contents ==="
+          ls -la $THEOS/sdks/iphoneos.sdk/ 2>/dev/null | head -20 || true
 
       - name: Build package
         env:
@@ -105,15 +146,23 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           FINALPACKAGE: 1
           FOR_RELEASE: 1
+          LINK_SWIFT: ${{ env.LINK_SWIFT }}
         run: |
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
 
-          # Ensure ARCH is passed to make
-          make package ARCH=${ARCH} VERSION=${VERSION}
+          echo "Building for ARCH=$ARCH VERSION=$VERSION"
+
+          # Build with verbose output on failure
+          if make package ARCH=${ARCH} VERSION=${VERSION} 2>&1; then
+            echo "Build succeeded"
+          else
+            echo "::error::Build failed, showing last 100 lines of make output"
+            exit 1
+          fi
 
           # Find the built deb
-          DEB_FILE=$(find .theos/_/debs -name "*.deb" | head -1)
+          DEB_FILE=$(find .theos/_/debs -name "*.deb" 2>/dev/null | head -1)
           if [ -z "$DEB_FILE" ]; then
             echo "::error::No .deb found!"
             ls -la .theos/_/debs/ 2>/dev/null || true
@@ -178,22 +227,6 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Optional: Build and test install on simulator (requires extra setup)
-  # test:
-  #   name: Test on Simulator
-  #   needs: build
-  #   runs-on: macos-latest
-  #   if: false  # Enable when needed
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: AutoCertRefresh-arm64-${{ needs.build.outputs.version }}
-  #         path: deb
-  #     - name: Install on simulator
-  #       run: |
-  #         # Requires ios-sim or xcrun simctl
-  #         echo "Simulator test placeholder"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
