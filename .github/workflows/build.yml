@@ -45,7 +45,7 @@ jobs:
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
 
-          # Install Theos
+          # Install Theos (includes vendor/dpkg/dm.pl for .deb packaging)
           sudo git clone --depth 1 https://github.com/theos/theos.git /opt/theos
 
           # Use Xcode's built-in iOS SDK (no download needed)
@@ -61,31 +61,20 @@ jobs:
             exit 1
           fi
 
-          # Install ldid + dpkg (for .deb packaging) and ensure dm.pl is available
-          brew install ldid dpkg >/dev/null 2>&1 || true
+          # Install ldid (dpkg tools come from Theos vendor)
+          brew install ldid >/dev/null 2>&1 || true
 
-          # Find and link dm.pl for Theos Debian packaging
-          DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
-          if [ -z "$DMPL_PATH" ]; then
-            DMPL_PATH=$(find /usr/local -name "dm.pl" 2>/dev/null | head -1)
-          fi
-          if [ -n "$DMPL_PATH" ]; then
+          # Link Theos's built-in dm.pl to where Theos expects it
+          if [ -f /opt/theos/vendor/dpkg/dm.pl ]; then
             sudo mkdir -p /opt/theos/bin
-            sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
-            echo "Linked dm.pl from $DMPL_PATH to /opt/theos/bin/dm.pl"
+            sudo ln -sf /opt/theos/vendor/dpkg/dm.pl /opt/theos/bin/dm.pl
+            echo "Linked Theos vendor dm.pl to /opt/theos/bin/dm.pl"
           else
-            echo "::warning::dm.pl not found, Theos package build may fail"
-            # Try to install dpkg-dev which might have dm.pl
-            brew install dpkg-dev >/dev/null 2>&1 || true
-            DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
-            if [ -n "$DMPL_PATH" ]; then
-              sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
-              echo "Linked dm.pl from $DMPL_PATH after dpkg-dev install"
-            fi
+            echo "::error::Theos vendor dm.pl not found at /opt/theos/vendor/dpkg/dm.pl"
+            ls -la /opt/theos/vendor/ 2>/dev/null || true
+            ls -la /opt/theos/vendor/dpkg/ 2>/dev/null || true
+            exit 1
           fi
-
-          # Ensure Homebrew paths are in PATH for dpkg tools
-          export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"
 
       - name: Build package
         env:
@@ -97,36 +86,7 @@ jobs:
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH
 
-          # Debug: check if dm.pl exists
-          echo "=== Checking for dm.pl ==="
-          ls -la /opt/theos/bin/dm.pl 2>/dev/null || echo "dm.pl not in /opt/theos/bin"
-          find /opt/homebrew -name "dm.pl" 2>/dev/null | head -5
-          find /usr/local -name "dm.pl" 2>/dev/null | head -5
-
-          # Ensure dm.pl is linked
-          if [ ! -f /opt/theos/bin/dm.pl ]; then
-            DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
-            if [ -z "$DMPL_PATH" ]; then
-              DMPL_PATH=$(find /usr/local -name "dm.pl" 2>/dev/null | head -1)
-            fi
-            if [ -n "$DMPL_PATH" ]; then
-              sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
-              echo "Linked dm.pl from $DMPL_PATH"
-            else
-              echo "::error::dm.pl not found anywhere!"
-              # Try installing dpkg-dev
-              brew install dpkg-dev >/dev/null 2>&1 || true
-              DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
-              if [ -n "$DMPL_PATH" ]; then
-                sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
-                echo "Linked dm.pl from $DMPL_PATH after dpkg-dev install"
-              else
-                exit 1
-              fi
-            fi
-          fi
-
-          # Verify dm.pl is executable
+          # Verify dm.pl is linked and executable
           ls -la /opt/theos/bin/dm.pl
           /opt/theos/bin/dm.pl --version 2>&1 || true
 
