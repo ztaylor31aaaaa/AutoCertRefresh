@@ -8,6 +8,7 @@
 @property (nonatomic, strong) PSSpecifier *detectedAccountSpecifier;
 @property (nonatomic, strong) PSSpecifier *detectedTeamIdSpecifier;
 @property (nonatomic, strong) PSSpecifier *detectedCertCountSpecifier;
+@property (nonatomic, strong) NSMutableArray *appSpecifiers;
 @end
 
 @implementation AutoCertRefreshListController
@@ -18,6 +19,20 @@
     if (!_prefs) {
         _prefs = [NSUserDefaults standardUserDefaults];
     }
+    _appSpecifiers = [NSMutableArray array];
+
+    self.title = @"AutoCertRefresh";
+
+    // Add "Test Refresh Now" button
+    UIBarButtonItem *testButton = [[UIBarButtonItem alloc] initWithTitle:@"Test All"
+                                                                    style:UIBarButtonItemStylePlain
+                                                                   target:self
+                                                                   action:@selector(testRefreshNow)];
+    UIBarButtonItem *refreshSelectedButton = [[UIBarButtonItem alloc] initWithTitle:@"Refresh Selected"
+                                                                            style:UIBarButtonItemStylePlain
+                                                                           target:self
+                                                                           action:@selector(refreshSelectedApps)];
+    self.navigationItem.rightBarButtonItems = @[testButton, refreshSelectedButton];
 
     // Cache specifiers for dynamic updates
     for (PSSpecifier *spec in _specifiers) {
@@ -32,6 +47,41 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self updateDetectedInfo];
+    [self updateAppList];
+}
+
+- (void)testRefreshNow {
+    [[AutoCertRefresh sharedInstance] performRefreshWithCompletion:^(BOOL success, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:success ? @"Success" : @"Failed"
+                                                                            message:error ? error.localizedDescription : @"Refresh completed"
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+    }];
+}
+
+- (void)refreshSelectedApps {
+    NSArray<NSString *> *selectedApps = [[AutoCertRefresh sharedInstance] getSelectedAppBundleIds];
+    if (selectedApps.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Selection"
+                                                                        message:@"No apps selected for individual refresh. Use the switches below to select apps."
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    [[AutoCertRefresh sharedInstance] refreshSpecificApps:selectedApps completion:^(BOOL success, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:success ? @"Success" : @"Failed"
+                                                                            message:error ? error.localizedDescription : [NSString stringWithFormat:@"Refreshed %lu selected app(s)", (unsigned long)selectedApps.count]
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+    }];
 }
 
 - (void)updateDetectedInfo {
@@ -60,6 +110,97 @@
     [_detectedAccountSpecifier setNeedsDisplay];
     [_detectedTeamIdSpecifier setNeedsDisplay];
     [_detectedCertCountSpecifier setNeedsDisplay];
+}
+
+- (void)updateAppList {
+    // Remove old dynamic app specifiers
+    for (PSSpecifier *spec in _appSpecifiers) {
+        [_specifiers removeObject:spec];
+    }
+    [_appSpecifiers removeAllObjects];
+
+    // Get apps with expiration info
+    NSDictionary *account = [[AutoCertRefresh sharedInstance] detectDopamineAccount];
+    if (!account) return;
+
+    NSString *teamId = account[@"TeamIdentifier"] ?: account[@"team_id"];
+    NSData *certData = nil;
+    if (account[@"DeveloperCertificate"]) {
+        certData = [NSData dataWithBase64EncodedString:account[@"DeveloperCertificate"] options:0];
+    }
+    if (!certData) {
+        certData = [[AutoCertRefresh sharedInstance] findCertificateForTeamId:teamId];
+    }
+    if (!certData) return;
+
+    NSArray<NSDictionary *> *apps = [[AutoCertRefresh sharedInstance] findAppsForCertificate:certData];
+    NSArray<NSString *> *selectedApps = [[AutoCertRefresh sharedInstance] getSelectedAppBundleIds];
+
+    // Add section header for apps
+    PSSpecifier *appsHeader = [PSSpecifier specifierWithType:PSGroupCell
+                                                       key:@"appsHeader"
+                                                       title:@"Installed Apps (Expiration)"
+                                                      target:self];
+    [_specifiers insertObject:appsHeader atIndex:[_specifiers indexOfObject:[self specForKey:@"aboutHeader"]]];
+    [_appSpecifiers addObject:appsHeader];
+
+    // Add each app as a switch cell with expiration info
+    for (NSDictionary *app in apps) {
+        NSString *bundleId = app[@"bundleId"];
+        NSString *displayName = app[@"displayName"];
+        NSString *timeRemaining = app[@"timeRemainingStr"];
+        BOOL isExpired = [app[@"isExpired"] boolValue];
+
+        BOOL isSelected = [selectedApps containsObject:bundleId];
+
+        NSString *title = [NSString stringWithFormat:@"%@ (%@) - %@", displayName, bundleId, timeRemaining];
+        if (isExpired) {
+            title = [NSString stringWithFormat:@"⚠️ %@ (EXPIRED)", title];
+        }
+
+        PSSpecifier *appSpec = [PSSpecifier specifierWithType:PSSwitchCell
+                                                         key:bundleId
+                                                        title:title
+                                                       target:self];
+        appSpec.defaultValue = @(isSelected);
+        appSpec.action = @selector(appSelectionChanged:);
+        [_appSpecifiers addObject:appSpec];
+
+        // Insert before the "About" section
+        NSUInteger insertIndex = [_specifiers indexOfObject:[self specForKey:@"aboutHeader"]];
+        if (insertIndex != NSNotFound) {
+            [_specifiers insertObject:appSpec atIndex:insertIndex];
+        } else {
+            [_specifiers addObject:appSpec];
+        }
+    }
+
+    [self.tableView reloadData];
+}
+
+- (PSSpecifier *)specForKey:(NSString *)key {
+    for (PSSpecifier *spec in _specifiers) {
+        if ([spec.key isEqualToString:key]) return spec;
+    }
+    return nil;
+}
+
+- (void)appSelectionChanged:(PSSpecifier *)specifier {
+    NSArray<NSString *> *selectedApps = [[AutoCertRefresh sharedInstance] getSelectedAppBundleIds];
+    NSMutableArray *mutableSelection = [selectedApps mutableCopy];
+
+    NSString *bundleId = specifier.key;
+    BOOL isSelected = [specifier.boolValue];
+
+    if (isSelected) {
+        if (![mutableSelection containsObject:bundleId]) {
+            [mutableSelection addObject:bundleId];
+        }
+    } else {
+        [mutableSelection removeObject:bundleId];
+    }
+
+    [[AutoCertRefresh sharedInstance] setSelectedAppBundleIds:mutableSelection];
 }
 
 - (void)setupTokenAction:(PSSpecifier *)specifier {
@@ -108,6 +249,7 @@
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
             [self updateDetectedInfo];
+            [self updateAppList];
         });
     }];
 }

@@ -13,8 +13,7 @@ permissions:
   packages: write
 
 env:
-  IOS_SDK_VERSION: 14.5
-  TARGET_IOS: 14.5
+  TARGET_IOS: 14.0
 
 jobs:
   build:
@@ -40,26 +39,27 @@ jobs:
             echo "VERSION=0.0.0-dev.$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           fi
 
-      - name: Install Theos + iOS 14.5 SDK
+      - name: Setup Theos + use Xcode system SDK
         run: |
           set -euo pipefail
           export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
 
-          # Install Theos (sudo for /opt/theos)
+          # Install Theos
           sudo git clone --depth 1 https://github.com/theos/theos.git /opt/theos
 
-          # iOS 14.5 SDK - confirmed base SDK exists
-          SDK_VER=14.5
-          curl -L -f -o /tmp/iphoneos${SDK_VER}.sdk.tar.xz \
-            "https://github.com/theos/sdks/releases/download/iphoneos${SDK_VER}/iphoneos${SDK_VER}.sdk.tar.xz"
-
-          sudo mkdir -p /opt/theos/sdks
-          sudo tar -xf /tmp/iphoneos${SDK_VER}.sdk.tar.xz -C /opt/theos/sdks
-
-          # Link SDK
-          SDK_DIR=$(find /opt/theos/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
-          sudo ln -sf "$SDK_DIR" /opt/theos/sdks/iphoneos.sdk
+          # Use Xcode's built-in iOS SDK (no download needed)
+          # macOS runners have Xcode with iPhoneOS.sdk
+          XCODE_SDK="/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+          if [ -d "$XCODE_SDK" ]; then
+            sudo mkdir -p /opt/theos/sdks
+            sudo ln -sf "$XCODE_SDK" /opt/theos/sdks/iphoneos.sdk
+            echo "Linked Xcode SDK: $XCODE_SDK -> /opt/theos/sdks/iphoneos.sdk"
+          else
+            echo "::error::Xcode iOS SDK not found at $XCODE_SDK"
+            ls -la /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/
+            exit 1
+          fi
 
           # Install ldid
           brew install ldid >/dev/null 2>&1 || true

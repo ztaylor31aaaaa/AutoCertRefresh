@@ -11,6 +11,7 @@ static NSString *const kAccessGroup = @"group.com.sileo.autocertrefresh";
 static NSString *const kDopamineAccountPath = @"/var/mobile/.dopamine_account";
 static NSString *const kBGTaskIdentifier = @"com.autocertrefresh.refresh";
 static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
+static NSString *const kSelectedAppsKey = @"com.autocertrefresh.selectedApps";
 
 @interface AutoCertRefresh : NSObject
 + (instancetype)sharedInstance;
@@ -22,9 +23,14 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
 - (void)clearToken;
 - (NSDictionary *)detectDopamineAccount;
 - (NSArray<NSDictionary *> *)findAppsForCertificate:(NSData *)certData;
+- (NSDictionary *)getAppInfoWithExpiration:(NSString *)appPath;
+- (NSString *)formatTimeRemaining:(NSTimeInterval)seconds;
 - (void)scheduleBackgroundRefresh;
 - (void)performRefreshWithCompletion:(void (^)(BOOL success, NSError *error))completion;
 - (void)refreshAppsForCertificates:(NSArray<NSData *> *)certificates completion:(void (^)(BOOL, NSError *))completion;
+- (void)refreshSpecificApps:(NSArray<NSString *> *)bundleIds completion:(void (^)(BOOL, NSError *))completion;
+- (NSArray<NSString *> *)getSelectedAppBundleIds;
+- (void)setSelectedAppBundleIds:(NSArray<NSString *> *)bundleIds;
 @end
 
 @implementation AutoCertRefresh
@@ -152,7 +158,6 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
     // Scan common app installation directories
     NSArray *searchPaths = @[
         @"/var/containers/Bundle/Application",
-        @"/var/containers/Bundle/Application",
         @"/Applications",
         @"/var/mobile/Containers/Bundle/Application"
     ];
@@ -177,11 +182,14 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
                         if (bundleId) {
                             bundleId = [bundleId substringFromIndex:[bundleId rangeOfString:@"."].location + 1];
                         }
-                        [results addObject:@{
-                            @"path": fullPath,
-                            @"bundleId": bundleId ?: @"unknown",
-                            @"provision": provision
-                        }];
+                        NSDictionary *appInfo = [self getAppInfoWithExpiration:fullPath];
+                        if (appInfo) {
+                            NSMutableDictionary *mutableInfo = [appInfo mutableCopy];
+                            mutableInfo[@"path"] = fullPath;
+                            mutableInfo[@"bundleId"] = bundleId ?: @"unknown";
+                            mutableInfo[@"provision"] = provision;
+                            [results addObject:mutableInfo];
+                        }
                     }
                 }
             }
@@ -190,9 +198,90 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
     return results;
 }
 
+- (NSDictionary *)getAppInfoWithExpiration:(NSString *)appPath {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *embeddedPath = [appPath stringByAppendingPathComponent:@"embedded.mobileprovision"];
+
+    if (![fm fileExistsAtPath:embeddedPath]) return nil;
+
+    NSData *provisionData = [NSData dataWithContentsOfFile:embeddedPath];
+    if (!provisionData) return nil;
+
+    NSDictionary *provision = [self parseMobileProvision:provisionData];
+    if (!provision) return nil;
+
+    // Get expiration date
+    NSDate *expirationDate = provision[@"ExpirationDate"];
+    if (!expirationDate) return nil;
+
+    // Get app display name from Info.plist
+    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+    NSString *displayName = infoPlist[@"CFBundleDisplayName"] ?: infoPlist[@"CFBundleName"] ?: @"Unknown";
+    NSString *bundleId = infoPlist[@"CFBundleIdentifier"] ?: @"unknown";
+    NSString *version = infoPlist[@"CFBundleShortVersionString"] ?: @"1.0";
+
+    // Calculate time remaining
+    NSTimeInterval timeRemaining = [expirationDate timeIntervalSinceNow];
+    BOOL isExpired = timeRemaining <= 0;
+    NSString *timeRemainingStr = [self formatTimeRemaining:timeRemaining];
+
+    // Get certificate info
+    NSArray *certs = provision[@"DeveloperCertificates"];
+    NSData *firstCert = certs.firstObject;
+    NSString *certSubject = @"Unknown";
+    if (firstCert) {
+        SecCertificateRef certRef = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)firstCert);
+        if (certRef) {
+            CFStringRef summary = SecCertificateCopySubjectSummary(certRef);
+            if (summary) {
+                certSubject = (__bridge_transfer NSString *)summary;
+            }
+            CFRelease(certRef);
+        }
+    }
+
+    // Get team identifier
+    NSString *teamId = provision[@"TeamIdentifier"];
+    if (teamId && [teamId isKindOfClass:[NSArray class]]) {
+        teamId = teamId.firstObject;
+    }
+
+    return @{
+        @"path": appPath,
+        @"bundleId": bundleId,
+        @"displayName": displayName,
+        @"version": version,
+        @"expirationDate": expirationDate,
+        @"timeRemaining": @(timeRemaining),
+        @"timeRemainingStr": timeRemainingStr,
+        @"isExpired": @(isExpired),
+        @"teamId": teamId ?: @"Unknown",
+        @"certSubject": certSubject,
+        @"provision": provision
+    };
+}
+
+- (NSString *)formatTimeRemaining:(NSTimeInterval)seconds {
+    if (seconds <= 0) {
+        return @"EXPIRED";
+    }
+
+    NSInteger days = seconds / (24 * 3600);
+    NSInteger hours = (seconds - days * 24 * 3600) / 3600;
+    NSInteger minutes = (seconds - days * 24 * 3600 - hours * 3600) / 60;
+
+    if (days > 0) {
+        return [NSString stringWithFormat:@"%ldd %ldh %ldm", (long)days, (long)hours, (long)minutes];
+    } else if (hours > 0) {
+        return [NSString stringWithFormat:@"%ldh %ldm", (long)hours, (long)minutes];
+    } else {
+        return [NSString stringWithFormat:@"%ldm", (long)minutes];
+    }
+}
+
 - (NSDictionary *)parseMobileProvision:(NSData *)data {
     // Mobileprovision is a CMS signed plist - strip signature to get inner plist
-    // This is a simplified parser; production would use OpenSSL or Security framework CMS
     NSString *string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!string) return nil;
 
@@ -273,7 +362,24 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
         return;
     }
 
-    [self refreshAppsForCertificates:@[certData] completion:completion];
+    // Check if we should refresh only selected apps
+    NSArray<NSString *> *selectedApps = [self getSelectedAppBundleIds];
+    if (selectedApps.count > 0) {
+        [self refreshSpecificApps:selectedApps completion:completion];
+    } else {
+        [self refreshAppsForCertificates:@[certData] completion:completion];
+    }
+}
+
+- (NSArray<NSString *> *)getSelectedAppBundleIds {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    return [prefs objectForKey:kSelectedAppsKey] ?: @[];
+}
+
+- (void)setSelectedAppBundleIds:(NSArray<NSString *> *)bundleIds {
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [prefs setObject:bundleIds forKey:kSelectedAppsKey];
+    [prefs synchronize];
 }
 
 - (NSData *)findCertificateForTeamId:(NSString *)teamId {
@@ -341,6 +447,57 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
     });
 }
 
+- (void)refreshSpecificApps:(NSArray<NSString *> *)bundleIds completion:(void (^)(BOOL, NSError *))completion {
+    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
+    dispatch_async(queue, ^{
+        NSError *lastError = nil;
+        BOOL anySuccess = NO;
+
+        NSDictionary *account = [self detectDopamineAccount];
+        NSString *teamId = account[@"TeamIdentifier"] ?: account[@"team_id"];
+        NSData *certData = nil;
+        if (account[@"DeveloperCertificate"]) {
+            certData = [NSData dataWithBase64EncodedString:account[@"DeveloperCertificate"] options:0];
+        }
+        if (!certData) {
+            certData = [self findCertificateForTeamId:teamId];
+        }
+        if (!certData) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(NO, [NSError errorWithDomain:@"AutoCertRefresh" code:2 userInfo:@{NSLocalizedDescriptionKey: @"No certificate found"}]);
+            });
+            return;
+        }
+
+        NSArray<NSDictionary *> *allApps = [self findAppsForCertificate:certData];
+
+        for (NSDictionary *app in allApps) {
+            NSString *bundleId = app[@"bundleId"];
+            if (![bundleIds containsObject:bundleId]) continue;
+
+            NSString *appPath = app[@"path"];
+
+            BOOL success = [self reSignAppAtPath:appPath withCertificate:certData];
+            if (!success) {
+                success = [self requestInstalldRevalidation:bundleId];
+            }
+
+            if (success) {
+                anySuccess = YES;
+                NSLog(@"AutoCertRefresh: Refreshed %@", bundleId);
+            } else {
+                lastError = [NSError errorWithDomain:@"AutoCertRefresh" code:3 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to refresh %@", bundleId]}];
+            }
+        }
+
+        [self runUICache];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(anySuccess, lastError);
+        });
+    });
+}
+
 - (BOOL)reSignAppAtPath:(NSString *)appPath withCertificate:(NSData *)certData {
     // Use ldid to re-sign the app
     // This requires the signing identity to be available
@@ -377,57 +534,6 @@ static NSString *const kLaunchdLabel = @"com.autocertrefresh.daemon";
     char *argv[] = {"/usr/bin/uicache", NULL};
     posix_spawn(&pid, argv[0], NULL, NULL, argv, NULL);
     waitpid(pid, NULL, 0);
-}
-
-@end
-
-// Preference bundle controller
-@interface AutoCertRefreshListController : PSListController
-@property (nonatomic, strong) NSUserDefaults *prefs;
-@end
-
-@implementation AutoCertRefreshListController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    _prefs = [[NSUserDefaults alloc] initWithSuiteName:@"com.autocertrefresh"];
-    if (!_prefs) {
-        _prefs = [NSUserDefaults standardUserDefaults];
-    }
-
-    self.title = @"AutoCertRefresh";
-
-    // Add "Test Refresh Now" button
-    UIBarButtonItem *testButton = [[UIBarButtonItem alloc] initWithTitle:@"Test Now"
-                                                                    style:UIBarButtonItemStylePlain
-                                                                   target:self
-                                                                   action:@selector(testRefreshNow)];
-    self.navigationItem.rightBarButtonItem = testButton;
-}
-
-- (void)testRefreshNow {
-    [[AutoCertRefresh sharedInstance] performRefreshWithCompletion:^(BOOL success, NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:success ? @"Success" : @"Failed"
-                                                                            message:error ? error.localizedDescription : @"Refresh completed"
-                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-        });
-    }];
-}
-
-- (NSArray *)specifiers {
-    if (!_specifiers) {
-        _specifiers = [self loadSpecifiersFromPlistName:@"entry" target:self];
-    }
-    return _specifiers;
-}
-
-- (void)applySettings {
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    [[AutoCertRefresh sharedInstance] stop];
-    [[AutoCertRefresh sharedInstance] start];
 }
 
 @end
