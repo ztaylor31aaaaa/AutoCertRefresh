@@ -50,7 +50,7 @@ jobs:
 
           # Download dm.pl directly from Theos repo (vendor is a submodule not cloned with --depth 1)
           sudo mkdir -p /opt/theos/bin
-          curl -fsSL "https://raw.githubusercontent.com/theos/theos/master/vendor/dpkg/dm.pl" -o /opt/theos/bin/dm.pl
+          curl -fsSL "https://raw.githubusercontent.com/theos/theos/main/vendor/dpkg/dm.pl" -o /opt/theos/bin/dm.pl
           sudo chmod +x /opt/theos/bin/dm.pl
           echo "Downloaded dm.pl from Theos repo"
 
