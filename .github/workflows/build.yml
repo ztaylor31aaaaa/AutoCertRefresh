@@ -1,4 +1,4 @@
-name: Build AutoCertRefresh
+﻿name: Build AutoCertRefresh
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   packages: write
 
 env:
-  IOS_SDK_VERSION: 16.2
+  IOS_SDK_VERSION: 15.5
   TARGET_IOS: 14.0
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
           sudo git clone --depth 1 https://github.com/theos/theos.git /opt/theos
 
           # iOS 16.2 SDK - confirmed available
-          SDK_VER=16.2
+          SDK_VER=15.5
           curl -L -f -o /tmp/iphoneos${SDK_VER}.sdk.tar.xz \
             "https://github.com/theos/sdks/releases/download/iphoneos${SDK_VER}/iphoneos${SDK_VER}.sdk.tar.xz"
 
