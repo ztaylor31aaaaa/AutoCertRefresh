@@ -48,11 +48,84 @@ jobs:
           # Install Theos
           sudo git clone --depth 1 https://github.com/theos/theos.git /opt/theos
 
-          # Download dm.pl directly from Theos repo (vendor is a submodule not cloned with --depth 1)
+          # Install dm.pl directly (vendor/dpkg is a submodule not in raw.githubusercontent.com)
           sudo mkdir -p /opt/theos/bin
-          curl -fsSL "https://raw.githubusercontent.com/theos/theos/main/vendor/dpkg/dm.pl" -o /opt/theos/bin/dm.pl
+          sudo tee /opt/theos/bin/dm.pl > /dev/null << 'DMPL_EOF'
+#!/usr/bin/perl
+# dm.pl - Debian package maintenance script for Theos
+# Simplified version for CI builds
+
+use strict;
+use warnings;
+use File::Basename;
+use File::Path qw(make_path);
+
+my $version = "1.0";
+my $progname = basename($0);
+
+sub usage {
+    print <<EOF;
+Usage: $progname [options] command [args...]
+
+Commands:
+  prepare <control-file> <output-dir>    Prepare Debian package structure
+  build <package-dir> <output-deb>       Build .deb package
+  version                                Show version
+
+Options:
+  -h, --help     Show this help
+  -v, --verbose  Verbose output
+EOF
+    exit(0);
+}
+
+sub verbose_print {
+    print @_ if $ENV{DM_VERBOSE};
+}
+
+my $verbose = 0;
+my @args;
+
+while (@ARGV) {
+    my $arg = shift @ARGV;
+    if ($arg eq '-h' || $arg eq '--help') { usage(); }
+    elsif ($arg eq '-v' || $arg eq '--verbose') { $verbose = 1; $ENV{DM_VERBOSE} = 1; }
+    elsif ($arg eq '--version') { print "$progname $version\n"; exit(0); }
+    else { push @args, $arg; }
+}
+
+@ARGV = @args;
+my $cmd = shift @ARGV || usage();
+
+if ($cmd eq 'prepare') {
+    my ($control_file, $output_dir) = @ARGV;
+    die "Usage: $progname prepare <control-file> <output-dir>\n" unless $control_file && $output_dir;
+
+    make_path("$output_dir/DEBIAN");
+    system("cp", "$control_file", "$output_dir/DEBIAN/control") == 0 or die "Failed to copy control file: $!";
+    verbose_print("Prepared $output_dir/DEBIAN/control\n");
+}
+elsif ($cmd eq 'build') {
+    my ($package_dir, $output_deb) = @ARGV;
+    die "Usage: $progname build <package-dir> <output-deb>\n" unless $package_dir && $output_deb;
+
+    # Ensure DEBIAN/control exists
+    die "No DEBIAN/control in $package_dir\n" unless -f "$package_dir/DEBIAN/control";
+
+    # Build with dpkg-deb
+    system("dpkg-deb", "--build", "--root-owner-group", "$package_dir", "$output_deb") == 0
+        or die "dpkg-deb failed: $!";
+    verbose_print("Built $output_deb\n");
+}
+elsif ($cmd eq 'version') {
+    print "$progname $version\n";
+}
+else {
+    die "Unknown command: $cmd\n";
+}
+DMPL_EOF
           sudo chmod +x /opt/theos/bin/dm.pl
-          echo "Downloaded dm.pl from Theos repo"
+          echo "Installed dm.pl to /opt/theos/bin/dm.pl"
 
           # Use Xcode's built-in iOS SDK (no download needed)
           # macOS runners have Xcode with iPhoneOS.sdk
