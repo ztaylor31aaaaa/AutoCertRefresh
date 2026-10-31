@@ -61,8 +61,31 @@ jobs:
             exit 1
           fi
 
-          # Install ldid + dpkg (for .deb packaging)
+          # Install ldid + dpkg (for .deb packaging) and ensure dm.pl is available
           brew install ldid dpkg >/dev/null 2>&1 || true
+
+          # Find and link dm.pl for Theos Debian packaging
+          DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
+          if [ -z "$DMPL_PATH" ]; then
+            DMPL_PATH=$(find /usr/local -name "dm.pl" 2>/dev/null | head -1)
+          fi
+          if [ -n "$DMPL_PATH" ]; then
+            sudo mkdir -p /opt/theos/bin
+            sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
+            echo "Linked dm.pl from $DMPL_PATH to /opt/theos/bin/dm.pl"
+          else
+            echo "::warning::dm.pl not found, Theos package build may fail"
+            # Try to install dpkg-dev which might have dm.pl
+            brew install dpkg-dev >/dev/null 2>&1 || true
+            DMPL_PATH=$(find /opt/homebrew -name "dm.pl" 2>/dev/null | head -1)
+            if [ -n "$DMPL_PATH" ]; then
+              sudo ln -sf "$DMPL_PATH" /opt/theos/bin/dm.pl
+              echo "Linked dm.pl from $DMPL_PATH after dpkg-dev install"
+            fi
+          fi
+
+          # Ensure Homebrew paths are in PATH for dpkg tools
+          export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"
 
       - name: Build package
         env:
