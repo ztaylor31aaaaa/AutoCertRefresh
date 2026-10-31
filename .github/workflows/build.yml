@@ -12,11 +12,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IOS_SDK_VERSION: 16.4
-  TARGET_IOS: 14.0
-  LINK_SWIFT: 0
-
 jobs:
   build:
     name: Build .deb (${{ matrix.arch }})
@@ -44,97 +39,12 @@ jobs:
             echo "VERSION=0.0.0-dev.${COUNT}.${HASH}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Cache Theos & SDK
-        id: cache-theos
-        uses: actions/cache@v4
+      # 🔑 One action replaces all manual Theos/SDK/cache logic
+      - name: Setup Theos + iOS SDK
+        uses: maxim-lobanov/setup-theos@v1
         with:
-          path: |
-            ~/theos
-            ~/theos-cache
-          key: theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v5-${{ hashFiles('**/Makefile') }}
-          restore-keys: |
-            theos-ios-${{ env.IOS_SDK_VERSION }}-${{ matrix.arch }}-v5-
-
-      - name: Install Theos & SDK (if not cached)
-        if: steps.cache-theos.outputs.cache-hit != 'true'
-        env:
-          IOS_SDK_VERSION: ${{ env.IOS_SDK_VERSION }}
-        run: |
-          set -euo pipefail
-
-          export THEOS=~/theos
-          export PATH=$THEOS/bin:$PATH
-
-          # Install Theos to writable location
-          git clone --depth 1 https://github.com/theos/theos.git $THEOS
-
-          # Install iOS SDK from reliable mirrors
-          SDK_URLS=(
-            "https://github.com/theos/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
-            "https://github.com/phoenixdev-org/sdks/releases/download/iphoneos${IOS_SDK_VERSION}/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz"
-          )
-
-          SDK_DOWNLOADED=0
-          for url in "${SDK_URLS[@]}"; do
-            echo "Trying SDK: $url"
-            if curl -L -f -o /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz "$url" 2>/dev/null; then
-              SDK_DOWNLOADED=1
-              break
-            fi
-          done
-
-          if [ $SDK_DOWNLOADED -eq 0 ]; then
-            echo "::error::Failed to download iOS SDK from all mirrors"
-            exit 1
-          fi
-
-          mkdir -p $THEOS/sdks
-          tar -xf /tmp/iphoneos${IOS_SDK_VERSION}.sdk.tar.xz -C $THEOS/sdks
-
-          # Find the actual SDK directory name (varies by archive)
-          SDK_DIR=$(find $THEOS/sdks -maxdepth 1 -type d -name "*.sdk" | head -1)
-          if [ -z "$SDK_DIR" ]; then
-            SDK_DIR=$(find $THEOS/sdks -maxdepth 1 -type d -name "iphoneos*" | head -1)
-          fi
-
-          if [ -n "$SDK_DIR" ]; then
-            ln -sf "$SDK_DIR" $THEOS/sdks/iphoneos.sdk
-            echo "SDK linked: $SDK_DIR -> $THEOS/sdks/iphoneos.sdk"
-          else
-            echo "::error::SDK directory not found after extraction"
-            ls -la $THEOS/sdks/
-            exit 1
-          fi
-
-          # Install ldid
-          brew install ldid >/dev/null 2>&1 || true
-
-          # Cache
-          cp -r $THEOS ~/theos-cache/theos
-          cp -r $THEOS/sdks ~/theos-cache/sdks
-
-      - name: Restore Theos from cache
-        if: steps.cache-theos.outputs.cache-hit == 'true'
-        run: |
-          export THEOS=~/theos
-          export PATH=$THEOS/bin:$PATH
-          cp -r ~/theos-cache/theos $THEOS
-          cp -r ~/theos-cache/sdks $THEOS/sdks
-
-      - name: Verify toolchain
-        run: |
-          export THEOS=~/theos
-          export PATH=$THEOS/bin:$PATH
-          echo "=== Toolchain ==="
-          which make
-          which clang
-          which ldid
-          which dpkg-deb
-          $THEOS/bin/bootstrap.sh --version 2>&1 | head -5 || true
-          echo "=== SDK ==="
-          ls -la $THEOS/sdks/
-          echo "=== SDK Contents ==="
-          ls -la $THEOS/sdks/iphoneos.sdk/ 2>/dev/null | head -20 || true
+          theos-version: latest
+          ios-version: "16.4"
 
       - name: Build package
         env:
@@ -142,40 +52,33 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           FINALPACKAGE: 1
           FOR_RELEASE: 1
-          LINK_SWIFT: ${{ env.LINK_SWIFT }}
         run: |
-          export THEOS=~/theos
+          export THEOS=/opt/theos
           export PATH=$THEOS/bin:$PATH
+          make package ARCH=${ARCH} VERSION=${VERSION}
 
-          echo "Building for ARCH=$ARCH VERSION=$VERSION"
-
-          if make package ARCH=${ARCH} VERSION=${VERSION} 2>&1; then
-            echo "Build succeeded"
-          else
-            echo "::error::Build failed"
-            exit 1
-          fi
-
-          DEB_FILE=$(find .theos/_/debs -name "*.deb" 2>/dev/null | head -1)
-          if [ -z "$DEB_FILE" ]; then
-            echo "::error::No .deb found!"
+      - name: Find .deb
+        id: deb
+        run: |
+          f=$(find .theos/_/debs -name "*.deb" 2>/dev/null | head -1)
+          if [ -z "$f" ]; then
+            echo "::error::No .deb found"
             ls -la .theos/_/debs/ 2>/dev/null || true
             exit 1
           fi
-
-          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
-          echo "DEB_NAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
+          echo "file=$f" >> $GITHUB_OUTPUT
+          echo "name=$(basename $f)" >> $GITHUB_OUTPUT
 
       - name: Verify .deb contents
         run: |
-          dpkg-deb -c "${DEB_FILE}"
-          dpkg-deb -I "${DEB_FILE}"
+          dpkg-deb -c "${{ steps.deb.outputs.file }}"
+          dpkg-deb -I "${{ steps.deb.outputs.file }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AutoCertRefresh-${{ matrix.arch }}-${{ steps.version.outputs.VERSION }}
-          path: ${{ env.DEB_FILE }}
+          path: ${{ steps.deb.outputs.file }}
           retention-days: 30
 
   release:
